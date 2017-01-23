@@ -1,0 +1,214 @@
+###############################################################################
+#
+#            Another Simple Spirent TestCenter Traffic Example for Python
+#                         by Spirent Communications
+#
+#
+# Description: This is a simple example for bgp emulation with bounded stream block 
+#              script need 2 back to back ports on stc
+#
+###############################################################################
+
+###############################################################################
+# Copyright (c) 2016 SPIRENT COMMUNICATIONS OF CALABASAS, INC.
+# All Rights Reserved
+#
+#                SPIRENT COMMUNICATIONS OF CALABASAS, INC.
+#                            LICENSE AGREEMENT
+#
+#  By accessing or executing this software, you agree to be bound by the terms
+#  of this agreement.
+#
+# Redistribution and use of this software in source and binary forms, with or
+# without modification, are permitted provided that the following conditions
+# are met:
+#  1. Redistribution of source code must retain the above copyright notice,
+#     this list of conditions and the following disclaimer.
+#  2. Redistribution's in binary form must reproduce the above copyright notice.
+#     This list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+#  3. Neither the name SPIRENT, SPIRENT COMMUNICATIONS, SMARTBITS, nor the names
+#     of its contributors may be used to endorse or promote products derived
+#     from this software without specific prior written permission.
+#
+# This software is provided by the copyright holders and contributors [as is]
+# and any express or implied warranties, including, but not limited to, the
+# implied warranties of merchantability and fitness for a particular purpose
+# are disclaimed. In no event shall the Spirent Communications of Calabasas,
+# Inc. Or its contributors be liable for any direct, indirect, incidental,
+# special, exemplary, or consequential damages (including, but not limited to,
+# procurement of substitute goods or services; loss of use, data, or profits;
+# or business interruption) however caused and on any theory of liability,
+# whether in contract, strict liability, or tort (including negligence or
+# otherwise) arising in any way out of the use of this software, even if
+# advised of the possibility of such damage.
+#
+###############################################################################
+
+import time
+import sys
+
+# Point to the StcPython.py file in your Spirent TestCenter installation.
+# You first need to either set the environment variable "STC_PRIVATE_INSTALL_DIR",
+# or change the StcPython.py file ("STC_PRIVATE_INSTALL_DIR") to point to your
+# installation.
+# eg: os.environ['STC_PRIVATE_INSTALL_DIR'] = '/home/pwari/spirent/stc/stc4.59/'
+
+print("Loading the Spirent TestCenter API...")
+#sys.path.append("C:/Program Files (x86)/Spirent Communications/Spirent TestCenter 4.64/Spirent TestCenter Application/API/Python")
+sys.path.append("/home/pwari/tools/stc/stc4.66/Spirent_TestCenter_4.66/Spirent_TestCenter_Application_Linux/API/Python")
+from StcPython import StcPython
+stc = StcPython()
+
+# Physical topology
+chassisip= "10.140.96.51"
+txportloc = "//%s/%s/%s" % (chassisip,4,2)
+rxportloc = "//%s/%s/%s" % (chassisip,4,6)
+portlist  = "%s %s" % (txportloc,rxportloc)
+port1ipv4 = "192.168.0.1"
+port2ipv4 = "192.168.0.2"
+vlanid = "10"
+port1as   = "100" 
+port2as   = "101"
+labserverip = '192.168.98.130'
+
+###############################################################################
+####
+####    Main
+####
+###############################################################################
+
+if labserverip:
+    # If you are using a lab server, connect to it now.
+    print("Connecting to Lab Server")
+    stc.perform("CSTestSessionConnect", host=labserverip,
+                                        TestSessionName="sample",
+                                        CreateNewTestSession="true")
+
+    # Terminate the Lab Server session when the last client disconnects.
+    stc.perform("TerminateBll", TerminateType="ON_LAST_DISCONNECT")
+
+# Instruct the API to not display all commands to STDOUT.
+stc.config("AutomationOptions", logTo="stcapi.log", logLevel="INFO")
+
+#Create project
+print "Create project"
+hproject = stc.create("project")
+
+#Create port 
+print "Create port"
+port1 = stc.create("port",under=hproject,location=txportloc,useDefaulthost=False)
+port2 = stc.create("port",under=hproject,location=rxportloc,useDefaulthost=False)
+
+#Attach port 
+print "attach ports ", port1,port2
+stc.perform("AttachPorts")
+stc.apply()
+
+#create emulated device
+print "creating emulated device"
+hdeviceport1 = stc.perform("DeviceCreate",ParentList=hproject,DeviceType="Router",IfStack="Ipv4If VlanIf EthIIIf",IfCount="1 1 1",Port=port1)
+hdeviceport2 = stc.perform("DeviceCreate",ParentList=hproject,DeviceType="Router",IfStack="Ipv4If VlanIf EthIIIf",IfCount="1 1 1",Port=port2)
+hdevice1 = hdeviceport1["ReturnList"]
+hdevice2 = hdeviceport2["ReturnList"]
+
+#Enable BGP protocol
+print "Enable bgp on router"
+kwargs1={"UsesIf-targets":stc.get(hdevice1,"toplevelif-Targets")}
+kwargs2={"UsesIf-targets":stc.get(hdevice2,"toplevelif-Targets")}
+hbgpport1 = stc.create("BgpRouterConfig",under=hdevice1,AsNum=port1as,DutasNum=port2as,DutIpv4Addr=port2ipv4, **kwargs1)
+hbgpport2 = stc.create("BgpRouterConfig",under=hdevice2,AsNum=port2as,DutasNum=port1as,DutIpv4Addr=port1ipv4, **kwargs2)
+
+#configure the addressing information for each device.
+stc.config(hdevice1 + ".ethiiif", SourceMac= "00:10:00:01:00:01")
+stc.config(hdevice1 + ".ipv4if", Address=port1ipv4, Gateway=port2ipv4, PrefixLength=24)
+stc.config(hdevice1 + ".vlanif", VlanId=vlanid)
+
+stc.config(hdevice2 + ".ethiiif", SourceMac = "00:10:00:01:00:03")
+stc.config(hdevice2 + ".ipv4if", Address=port2ipv4, Gateway=port1ipv4, PrefixLength=24)
+stc.config(hdevice2 + ".vlanif", VlanId=vlanid)
+
+stc.apply()
+stc.perform("SaveToTcc", config="System1", filename="samplebgp.tcc")
+
+#Retrieve src and dst binding objects
+port1ipv4binding = stc.get(hdevice1, "Children-ipv4if")
+port2ipv4binding = stc.get(hdevice2, "Children-ipv4if")
+
+#Create BGP route 100 on port1 and 200 on port2
+bgproute1 = stc.create("BgpIpv4RouteConfig", under=hbgpport1, AsPath=port1as) 
+bgproute2 = stc.create("BgpIpv4RouteConfig", under=hbgpport2, AsPath=port2as)
+bgproute1ipv4 = stc.get(bgproute1, "Children-Ipv4NetworkBlock")
+bgproute2ipv4 = stc.get(bgproute2, "Children-Ipv4NetworkBlock")
+stc.config(bgproute1ipv4, StartIpList = "100.0.0.0", NetworkCount = "100", Name = "BGP route from 100.0.0.0/24 to 100.0.99.0/24") 
+stc.config(bgproute2ipv4, StartIpList = "110.0.0.0", NetworkCount = "200", Name = "BGP route from 110.0.0.0/24 to 110.0.199.0/24")
+stc.apply()
+
+#Create stream
+streamblock3 = stc.create("StreamBlock", under=port1, Name = "Bgproutestream", ExpectedRxPort=port2, SrcBinding=bgproute1ipv4, DstBinding=bgproute2ipv4, TrafficPattern = "BACKBONE")
+streamblock4 = stc.create("StreamBlock", under=port2, Name = "Bgproutestream", ExpectedRxPort=port1, SrcBinding=bgproute2ipv4, DstBinding=bgproute1ipv4, TrafficPattern = "BACKBONE")
+
+#start bgp Device
+print"start bgp device"
+status = stc.perform("DeviceStart")
+print status["Status"]
+
+stc.perform("SaveToTcc", config="system1", filename=("samplebgp.tcc"))
+stc.apply()
+
+#Retrieve  Generator and Analyzer Objects  
+hgenerator = stc.get(port1, "Children-Generator")
+hanalyzer = stc.get(port2, "Children-Analyzer")
+
+# Configure generator.
+print "Configuring Generator"
+hgeneratorconfig=stc.get(hgenerator, "children-GeneratorConfig")
+stc.config(hgeneratorconfig, DurationMode='CONTINUOUS')
+
+# Analyzer Configuration.
+print "Configure Analyzer"
+hanalyzerconfig=stc.get(hanalyzer, "children-AnalyzerConfig")
+
+# Subscribe to realtime results.
+print "Subscribe to results"
+stc.subscribe(Parent=hproject,ConfigType='Analyzer',resulttype='AnalyzerPortResults',filenameprefix='Analyzer_Port_Results')
+stc.subscribe(Parent=hproject,ConfigType='Generator',resulttype='GeneratorPortResults',filenameprefix='Generator_Port_Counter')
+streamsubscribe=stc.subscribe(Parent=hproject,ConfigType='StreamBlock',resulttype='TxStreamBlockResults',filenameprefix='Stream_block_count')
+streamsubscribe1=stc.subscribe(Parent=hproject,ConfigType='StreamBlock',resulttype='RxStreamBlockResults',filenameprefix='Stream_block_count')
+stc.apply()
+
+#Start the stream
+print "Starting the stream"
+stc.perform("StreamBlockStart")
+
+#Refresh the result database
+print "Refreshing the result database"
+stc.perform("RefreshResultView",resultDataSet=streamsubscribe)
+stc.perform("RefreshResultView",resultDataSet=streamsubscribe1)
+
+#get the tx famecount on streamblock
+streamblockresult=stc.get(streamblock3,"children-TxStreamBlockResults")
+txframecount=stc.get(streamblockresult,"FrameCount")
+
+print "Tx Frame count on streamblock : ",txframecount
+
+#get the Rx famecount on streamblock
+streamblockresult1=stc.get(streamblock3,"children-RxStreamBlockResults")
+rxframecount=stc.get(streamblockresult,"FrameCount")
+
+print "Rx Frame count on streamblock : ",rxframecount
+
+#stop the streamblock
+stc.perform("StreamBlockSTop")
+
+# Delete configuration
+print "Deleting project"
+stc.delete(hproject)
+
+if labserverip:
+   #Disconnect LS
+   stc.perform("CSTestSessionDisconnect",Terminate="TRUE")
+
+print("Complete!")
+exit()
+
