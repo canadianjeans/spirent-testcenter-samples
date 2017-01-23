@@ -1,0 +1,196 @@
+###############################################################################
+#
+#            Another Simple Spirent TestCenter Traffic Example for Python
+#                         by Spirent Communications
+#
+#   Date: August 15, 2016
+# Author: Poornima Wari - poornima.wari@spirent.com
+#
+# Description: This is a simple igmp script 
+#              script need 2 back to back ports on stc
+#
+###############################################################################
+
+###############################################################################
+# Copyright (c) 2016 SPIRENT COMMUNICATIONS OF CALABASAS, INC.
+# All Rights Reserved
+#
+#                SPIRENT COMMUNICATIONS OF CALABASAS, INC.
+#                            LICENSE AGREEMENT
+#
+#  By accessing or executing this software, you agree to be bound by the terms
+#  of this agreement.
+#
+# Redistribution and use of this software in source and binary forms, with or
+# without modification, are permitted provided that the following conditions
+# are met:
+#  1. Redistribution of source code must retain the above copyright notice,
+#     this list of conditions and the following disclaimer.
+#  2. Redistribution's in binary form must reproduce the above copyright notice.
+#     This list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+#  3. Neither the name SPIRENT, SPIRENT COMMUNICATIONS, SMARTBITS, nor the names
+#     of its contributors may be used to endorse or promote products derived
+#     from this software without specific prior written permission.
+#
+# This software is provided by the copyright holders and contributors [as is]
+# and any express or implied warranties, including, but not limited to, the
+# implied warranties of merchantability and fitness for a particular purpose
+# are disclaimed. In no event shall the Spirent Communications of Calabasas,
+# Inc. Or its contributors be liable for any direct, indirect, incidental,
+# special, exemplary, or consequential damages (including, but not limited to,
+# procurement of substitute goods or services; loss of use, data, or profits;
+# or business interruption) however caused and on any theory of liability,
+# whether in contract, strict liability, or tort (including negligence or
+# otherwise) arising in any way out of the use of this software, even if
+# advised of the possibility of such damage.
+#
+###############################################################################
+
+import time
+import sys
+
+# Point to the StcPython.py file in your Spirent TestCenter installation.
+# You first need to either set the environment variable "STC_PRIVATE_INSTALL_DIR",
+# or change the StcPython.py file ("STC_PRIVATE_INSTALL_DIR") to point to your
+# installation.
+# eg: os.environ['STC_PRIVATE_INSTALL_DIR'] = '/home/pwari/spirent/stc/stc4.59/'
+
+print("Loading the Spirent TestCenter API...")
+#sys.path.append("C:/Program Files (x86)/Spirent Communications/Spirent TestCenter 4.64/Spirent TestCenter Application/API/Python")
+sys.path.append("/home/pwari/tools/stc/stc4.66/Spirent_TestCenter_4.66/Spirent_TestCenter_Application_Linux/API/Python")
+from StcPython import StcPython
+stc = StcPython()
+
+#Physical Topology 
+chassisip = "192.168.98.131" 
+txportloc = "//%s/%s/%s" % (chassisip,1,2)
+rxportloc = "//%s/%s/%s" % (chassisip,1,3)
+portlist  = "%s %s" % (txportloc,rxportloc)
+device1ip = "192.168.0.1"
+device1gw = "192.168.0.2"
+device2ip = "192.168.10.1"
+device2gw = "192.168.10.2"
+device3ip = "192.168.20.1"
+device3gw = "192.168.20.2"
+vlanid1 = "10"
+vlanid2 = "20"
+labserverip = "192.168.98.130"
+licensesrvip = "192.168.98.132"
+
+if labserverip:
+   #Connect to Lab Server and create new test seesion
+   print "Connecting Lab Server and creating new session"
+   stc.perform("CSServerConnect",Host=labserverip)
+   stc.perform("CSTestSessionConnect",Host=labserverip, CreateNewTestSession="TRUE", ownerid="pwari",TestSessionName="SampleMcast")
+   #Terminate session on script abort
+   stc.perform('terminatebll', TerminateType="ON_LAST_DISCONNECT")
+
+if licensesrvip:
+   #Connect to license server
+   print "Connecting to License Server"
+   licensemgr = stc.get("system1","children-licenseservermanager")
+   stc.create("LicenseServer",under=licensemgr,server=licensesrvip)
+
+#Create project
+print "Create project"
+hproject = stc.create("project")
+
+#Create port 
+print "Create port"
+port1 = stc.create("port",under=hproject,location=txportloc,useDefaulthost=False)
+port2 = stc.create("port",under=hproject,location=rxportloc,useDefaulthost=False)
+
+#Attach port 
+print "attach ports ", port1,port2
+stc.perform("AttachPorts")
+stc.apply()
+
+#create emulated device
+print "creating emulated device"
+hdeviceport1 = stc.perform("DeviceCreate",ParentList=hproject,DeviceType="Router",IfStack="Ipv4If VlanIf EthIIIf",IfCount="1 1 1",Port=port1, Name="Client1")
+hdevice1port1 = stc.perform("DeviceCreate",ParentList=hproject,DeviceType="Router", IfStack="Ipv4If VlanIf EthIIIf", IfCount="1 1 1", Port=port1, Name="Client2")
+hdeviceport2 = stc.perform("DeviceCreate",ParentList=hproject,DeviceType="Router",IfStack="Ipv4If EthIIIf",IfCount="1 1",Port=port2, Name="Uplink")
+
+#Retrive the device handle
+hdevice1 = hdeviceport1["ReturnList"]
+hdevice2 = hdevice1port1["ReturnList"]
+hdevice3 = hdeviceport2["ReturnList"]
+
+#Enable Igmp protocol
+print "Enable Igmp clients "
+kwargs1={"UsesIf-targets":stc.get(hdevice1,"toplevelif-Targets")}
+kwargs2={"UsesIf-targets":stc.get(hdevice2,"toplevelif-Targets")}
+#hmcast1 = stc.create("IgmpRouterConfig",Active="TRUE", under=hdevice1, **kwargs1)
+#hmcast2 = stc.create("IgmpRouterConfig",Active="TRUE",under=hdevice2, **kwargs2)
+higmphost1 = stc.create("IgmpHostConfig",Active="TRUE", under=hdevice1, **kwargs1)
+higmphost2 = stc.create("IgmpHostConfig",Active="TRUE",under=hdevice2, **kwargs2)
+
+#configure the addressing information for each device.
+print "Configure the address information"
+stc.config(hdevice1 + ".ethiiif", SourceMac= "00:10:00:01:00:01")
+stc.config(hdevice1 + ".ipv4if", Address=device1ip, Gateway=device1gw, PrefixLength=24)
+stc.config(hdevice1 + ".vlanif", VlanId=vlanid1)
+
+stc.config(hdevice2 + ".ethiiif", SourceMac = "00:10:00:01:00:03")
+stc.config(hdevice2 + ".ipv4if", Address=device2ip, Gateway=device2gw, PrefixLength=24)
+stc.config(hdevice2 + ".vlanif", VlanId=vlanid2)
+
+stc.config(hdevice3 + ".ethiiif", SourceMac = "00:10:00:01:00:04")
+stc.config(hdevice3 + ".ipv4if", Address=device3ip, Gateway=device3gw, PrefixLength=24)
+
+#Create Igmp group membership 
+higmpgrpmember1 = stc.create("IgmpGroupMembership",under=higmphost1, Active="TRUE", Name="Client1 IGMP GROUP MamberShip1")
+higmpgrpmember2 = stc.create("IgmpGroupMembership",under=higmphost1, Active="TRUE", Name="Client1 IGMP GROUP MemberShip2")
+higmpgrpmember3 = stc.create("IgmpGroupMembership",under=higmphost2, Active="TRUE", Name="Client2 IGMP GROUP Membership1")
+higmpgrpmember4 = stc.create("IgmpGroupMembership",under=higmphost2, Active="True", Name="Client2 IGMP GROUP Membership2")
+
+#Create IPV4 GROUP
+print " Create IPV4 group"
+hipv4grp1=stc.create("Ipv4Group",under=hproject, Name="IPV4 GROUP1")
+hipv4grp2=stc.create("Ipv4Group",under=hproject, Name="IPV4 GROUP2")
+hipv4grp3=stc.create("Ipv4Group",under=hproject, Name="IPV4 GROUP3")
+hipv4grp4=stc.create("Ipv4Group",under=hproject, Name="IPV4 GROUP4")
+
+#Retirieve the Network blcok of IPV4 GROUP
+netblock1 = stc.get(hipv4grp1, "children-Ipv4NetworkBlock")
+netblock2 = stc.get(hipv4grp2, "Children-Ipv4NetworkBlock")
+netblock3 = stc.get(hipv4grp3, "Children-Ipv4NetworkBlock")
+netblock4 = stc.get(hipv4grp4, "Children-Ipv4NetworkBlock")
+
+#Configure Addressing for MCAST GROUP
+print "Configure Addressing on MCAST Group"
+netblockip1 = stc.config(netblock1,StartIpList="225.0.0.1",NetworkCount=5)
+netblockip2 = stc.config(netblock2,StartIpList="226.0.0.1",NetworkCount=3)
+netblockip3 = stc.config(netblock3,StartIpList="227.0.0.1",NetworkCount=1)
+netblockip4 = stc.config(netblock4,StartIpList="228.0.0.1",NetworkCount=1)
+
+#Create Dictionary Hash for Keyword Subscribed-targets 
+kwargs1={"subscribedgroups-Targets":hipv4grp1}
+kwargs2={"subscribedgroups-Targets":hipv4grp2}
+kwargs3={"subscribedgroups-Targets":hipv4grp3}
+kwargs4={"subscribedgroups-Targets":hipv4grp4}
+
+#Attach the MCAST Group to IGMP Membership
+print "Attach the Mcast group to Igmp Membership"
+stc.config(higmpgrpmember1,**kwargs1)
+stc.config(higmpgrpmember3,**kwargs2)
+stc.config(higmpgrpmember2,**kwargs3)
+stc.config(higmpgrpmember4,**kwargs4)
+
+stc.apply()
+
+#Save as .tcc
+stc.perform("SaveToTcc", config="System1", filename="samplemcast.tcc")
+
+# Delete configuration
+print "Deleting project"
+stc.delete(hproject)
+
+if labserverip:
+   #Disconnect LS
+   stc.perform("CSTestSessionDisconnect",Terminate="TRUE")
+
+print("Complete!")
+exit()
+
